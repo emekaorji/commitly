@@ -35,20 +35,33 @@ Commitly removes that friction by:
 Commitly watches your workspace activity and commits when it detects a **natural break point** in your work.
 No commands. No prompts. No manual staging.
 
+Logical model: For every trigger below, run one or many of the following checks.
+
 #### Trigger Types
 
-| Trigger               | Description                           | Example                          |
-| --------------------- | ------------------------------------- | -------------------------------- |
-| **Idle**              | User stops coding for X seconds       | Auto-commit after 60s idle       |
-| **Branch Switch**     | Before switching branches             | Auto-commit pending changes      |
-| **Save Burst**        | Multiple saves in short period        | Commit once after burst          |
-| **Test Pass**         | Integration with test runner          | Commit after green tests         |
-| **Semantic Boundary** | Detects meaningful structural changes | Function added, file moved, etc. |
+| Trigger            | Description                          | Example                         |
+| ------------------ | ------------------------------------ | ------------------------------- |
+| **Idle**           | User stops coding for X seconds      | Auto-commit after 60s idle      |
+| **Save Burst**     | Multiple saves in short period       | Commit once after burst         |
+| **Test Pass**      | Integration with test runner         | Commit after green tests        |
+| **Editor Close**   | All active file editors closed       | Commit when workspace quiets    |
+| **Line Threshold** | Line changes exceed configured limit | Commit after 100+ lines changed |
+| **File Threshold** | File changes exceed configured limit | Commit after 5+ files changed   |
+| **Function Added** | File changes exceed configured limit | Commit after 5+ files changed   |
+| **File moved**     | File changes exceed configured limit | Commit after 5+ files changed   |
+
+#### Checks Cases
+
+| Check                 | Description                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| **Unsaved**           | Are there unsaved files?                                                            |
+| **Problems exist**    | Are there problems/errors in the code?                                              |
+| **Sufficient Change** | Does the change sufficiently live up to the feature branch name or fix branch name? |
 
 #### Behind the Scenes
 
 - Stages tracked files.
-- Generates AI or convention-based message.
+- Generates AI convention-based message.
 - Commits silently with contextual tags:
   ```bash
   feat(auto): refactor login handler for clarity
@@ -292,3 +305,19 @@ Commitly isn’t just another commit message helper.
 It’s the first **intelligent auto-commit companion** for VS Code — blending **timing**, **AI**, **convention**, and **developer experience** into one cohesive tool.
 
 > _“You focus on building. Commitly keeps your work in sync.”_
+
+---
+
+TRIGGERS:
+
+- When they run tests
+- When idle for 60 seconds
+- When dev closes all active file editors
+- When line changes are over x numbers
+- When file changes are over x numbers (configurable)
+
+CHECKS:
+
+- Are there unsaved files?
+- Does the change meaningfully live up to the feature branch name or fix branch name?
+- Are there problems/errors in the code?

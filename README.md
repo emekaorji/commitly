@@ -1,51 +1,58 @@
-# commitly README
+# Commitly
 
-This is the README for your extension "commitly". After writing up a brief description, we recommend including the following sections.
+Autonomous Git for Humans: automatically commits tracked changes at natural breakpoints (idle, tests passing, closing editors, large change thresholds) with guardrails.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
-
-For example if there is an image subfolder under your extension project workspace:
-
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+- Auto-commit triggers:
+  - Idle for N seconds
+  - Task-based “tests passed”
+  - Close all visible editors
+  - Thresholds: changed files / approx changed lines
+  - Branch switch (checkout)
+- Guardrails:
+  - Skips when there are unsaved files
+  - Skips on VS Code diagnostics errors (optional)
+  - Skips if branch implies `feat`/`fix` but message type doesn’t match (optional)
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- VS Code with the built-in Git extension enabled.
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
 This extension contributes the following settings:
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+- `commitly.autoCommit`: Enable/disable auto-commit.
+- `commitly.idleThreshold`: Seconds idle before committing.
+- `commitly.groupChangesWithin`: Grouping window for changes.
+- `commitly.pushAfterCommit`: Push after committing.
+- `commitly.pushStrategy`: `after-each` | `batch` | `manual`.
+- `commitly.ignorePatterns`: Simple ignore patterns (e.g. `*.env`).
+- `commitly.lineChangeThreshold`: Approx line threshold trigger.
+- `commitly.fileChangeThreshold`: File count threshold trigger.
+- `commitly.blockOnDiagnostics`: Block when diagnostics contain errors.
+- `commitly.branchRelevance`: Block on branch/message mismatch.
+- `commitly.testTaskNameIncludes`: Substrings treated as “test tasks”.
+
+Commands:
+
+- `Commitly: Commit Now`
+- `Commitly: Toggle Auto-Commit`
+- `Commitly: Show Status`
 
 ## Known Issues
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+- “Tests passed” trigger relies on VS Code tasks; it doesn’t yet integrate with the native Testing API.
+- “Batch” push currently behaves like “after-each” (push scheduling not implemented yet).
 
 ## Release Notes
 
 Users appreciate release notes as you update your extension.
 
-### 1.0.0
+### 0.0.1
 
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+Initial prototype: triggers, guardrails, and basic commit message heuristics.
 
 ---
 
@@ -65,7 +72,4 @@ You can author your README using Visual Studio Code. Here are some useful editor
 
 ## For more information
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+- VS Code Extension API docs: https://code.visualstudio.com/api

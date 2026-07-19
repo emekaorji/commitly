@@ -11,15 +11,114 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "commitly.helloWorld",
-        "title": "Hello World"
+        "command": "commitly.commitNow",
+        "title": "Commitly: Commit Now"
+      },
+      {
+        "command": "commitly.toggleAutoCommit",
+        "title": "Commitly: Toggle Auto-Commit"
+      },
+      {
+        "command": "commitly.showStatus",
+        "title": "Commitly: Show Status"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Commitly",
+      "properties": {
+        "commitly.autoCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable Commitly auto-commit."
+        },
+        "commitly.idleThreshold": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "description": "Seconds of inactivity before an idle auto-commit."
+        },
+        "commitly.groupChangesWithin": {
+          "type": "number",
+          "default": 180,
+          "minimum": 5,
+          "description": "Seconds to group edits into a single auto-commit window."
+        },
+        "commitly.pushAfterCommit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Push after auto-commit."
+        },
+        "commitly.pushStrategy": {
+          "type": "string",
+          "default": "manual",
+          "enum": [
+            "after-each",
+            "batch",
+            "manual"
+          ],
+          "description": "Auto-push strategy."
+        },
+        "commitly.aiCommitMessage": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable AI-generated commit messages (not implemented yet; currently uses heuristics)."
+        },
+        "commitly.ignorePatterns": {
+          "type": "array",
+          "default": [
+            "*.env",
+            "README.md"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Simple ignore patterns for auto-commit eligibility."
+        },
+        "commitly.lineChangeThreshold": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "description": "Approximate changed line threshold that can trigger an auto-commit."
+        },
+        "commitly.fileChangeThreshold": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "description": "Changed file count threshold that can trigger an auto-commit."
+        },
+        "commitly.blockOnDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Block auto-commit if any changed file has VS Code diagnostics with severity Error."
+        },
+        "commitly.branchRelevance": {
+          "type": "boolean",
+          "default": true,
+          "description": "Block auto-commit when branch name implies fix/feat and message type doesn't match."
+        },
+        "commitly.testTaskNameIncludes": {
+          "type": "array",
+          "default": [
+            "test",
+            "vitest",
+            "jest",
+            "pnpm test",
+            "npm test"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Task name substrings treated as test runs for the test-pass trigger."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
@@ -47,5 +146,6 @@
     "typescript": "^5.9.3",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2"
-  }
+  },
+  "packageManager": "pnpm@11.7.0+sha512.19cc852c120c7125760f2443ee6be0ca5b40f9f50598de1a09a1f177503e010e57c23c77646e01e761de59bf874fb22a3398c33ab9691fc13eb946b6f0f4d620"
 }
