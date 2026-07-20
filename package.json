@@ -1,20 +1,39 @@
 {
-  "id": "commitly",
   "name": "commitly",
   "displayName": "Commitly",
   "description": "Code. Think. Ship. — and let your commits take care of themselves.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "coderabbi",
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "commit",
+    "auto-commit",
+    "conventional-commits",
+    "ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/coderabbi/commitly.git"
+  },
+  "bugs": {
+    "url": "https://github.com/coderabbi/commitly/issues"
+  },
+  "homepage": "https://github.com/coderabbi/commitly#readme",
   "engines": {
     "vscode": "^1.105.0"
   },
   "categories": [
+    "SCM Providers",
     "Other"
   ],
   "activationEvents": [
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "vscode.git"
+  ],
   "contributes": {
     "commands": [
       {
@@ -28,6 +47,14 @@
       {
         "command": "commitly.showStatus",
         "title": "Commitly: Show Status"
+      },
+      {
+        "command": "commitly.setGroqKey",
+        "title": "Commitly: Set Groq API Key (unlock a better AI model)"
+      },
+      {
+        "command": "commitly.clearGroqKey",
+        "title": "Commitly: Clear Groq API Key"
       }
     ],
     "configuration": {
@@ -65,10 +92,58 @@
           ],
           "description": "Auto-push strategy."
         },
-        "commitly.aiCommitMessage": {
+        "commitly.ai.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Generate commit messages with AI. Falls back to a built-in heuristic whenever AI is unavailable, rate-limited, or produces an invalid message."
+        },
+        "commitly.ai.tier": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "proxy",
+            "byo"
+          ],
+          "enumDescriptions": [
+            "Use your own Groq key if set, otherwise the free hosted tier.",
+            "Always use the free hosted tier (Commitly proxy).",
+            "Always use your own Groq key (falls back to heuristic if no key is set)."
+          ],
+          "description": "Which AI backend to use. Add your own Groq key (command: 'Commitly: Set Groq API Key') to unlock a more capable model."
+        },
+        "commitly.ai.model": {
+          "type": "string",
+          "default": "",
+          "description": "Groq model id to use with your own key. Empty uses the default capable model (openai/gpt-oss-120b). Ignored on the free tier."
+        },
+        "commitly.ai.proxyUrl": {
+          "type": "string",
+          "default": "https://commitly-proxy.vercel.app/api/commit-message",
+          "description": "Endpoint for the free hosted commit-message tier. Override to self-host the proxy."
+        },
+        "commitly.ai.includeBody": {
           "type": "boolean",
           "default": false,
-          "description": "Enable AI-generated commit messages (not implemented yet; currently uses heuristics)."
+          "description": "Allow AI to add a short commit body below the subject line."
+        },
+        "commitly.ai.maxDiffBytes": {
+          "type": "number",
+          "default": 48000,
+          "minimum": 2000,
+          "description": "Maximum diff size (bytes) sent for message generation. Larger changes are summarized."
+        },
+        "commitly.ai.timeoutMs": {
+          "type": "number",
+          "default": 6000,
+          "minimum": 1000,
+          "description": "Timeout (ms) for a message-generation request before falling back to the heuristic."
+        },
+        "commitly.ai.minIntervalMs": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 0,
+          "description": "Minimum interval (ms) between AI calls per repository; bursts within this window use the heuristic."
         },
         "commitly.ignorePatterns": {
           "type": "array",
@@ -135,17 +210,21 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.105.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/vscode": "^1.105.0",
     "@typescript-eslint/eslint-plugin": "^8.45.0",
     "@typescript-eslint/parser": "^8.45.0",
-    "eslint": "^9.36.0",
-    "esbuild": "^0.25.10",
-    "npm-run-all": "^4.1.5",
-    "typescript": "^5.9.3",
     "@vscode/test-cli": "^0.0.11",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.25.10",
+    "eslint": "^9.36.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3"
   },
-  "packageManager": "pnpm@11.7.0+sha512.19cc852c120c7125760f2443ee6be0ca5b40f9f50598de1a09a1f177503e010e57c23c77646e01e761de59bf874fb22a3398c33ab9691fc13eb946b6f0f4d620"
+  "packageManager": "pnpm@11.7.0+sha512.19cc852c120c7125760f2443ee6be0ca5b40f9f50598de1a09a1f177503e010e57c23c77646e01e761de59bf874fb22a3398c33ab9691fc13eb946b6f0f4d620",
+  "dependencies": {
+    "@ai-sdk/groq": "^4.0.12",
+    "ai": "^7.0.31"
+  }
 }

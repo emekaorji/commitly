@@ -4,6 +4,5 @@ export type AutoCommitReason =
   | 'closeAllEditors'
   | 'threshold'
   | 'saveBurst'
-  | 'branchSwitch'
   | 'manual';
 

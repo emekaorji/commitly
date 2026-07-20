@@ -1,0 +1,19 @@
+{
+  "autoCommit": true,
+  "triggers": ["idle", "saveBurst", "testPass", "closeAllEditors", "thresholds"],
+  "idleThreshold": 60,
+  "groupChangesWithin": 180,
+  "pushAfterCommit": false,
+  "pushStrategy": "manual",
+  "ignorePatterns": ["*.env", "README.md"],
+  "lineChangeThreshold": 200,
+  "fileChangeThreshold": 20,
+  "blockOnDiagnostics": true,
+  "branchRelevance": true,
+  "ai": {
+    "enabled": true,
+    "tier": "auto",
+    "model": "",
+    "includeBody": false
+  }
+}

@@ -5,7 +5,21 @@ import { loadCommitlyConfig, type CommitlyConfig } from './config';
 import { CommitService } from './CommitService';
 import type { AutoCommitReason } from './types';
 import { shouldSkipDueToDiagnostics } from './diagnostics';
-import { StatusBar } from '../ui/StatusBar';
+import { isEligibleRel } from './glob';
+import { estimateChangedLines } from './changeEstimate';
+import { CommitMessageService } from './ai/CommitMessageService';
+
+export interface EngineStatusState {
+  enabled: boolean;
+  text: string;
+}
+
+export interface EngineDeps {
+  context: vscode.ExtensionContext;
+  log: vscode.OutputChannel;
+  reportStatus: (state: EngineStatusState) => void;
+  requestAiConsent: () => void;
+}
 
 type WindowCounters = {
   windowStartMs: number;
@@ -13,13 +27,32 @@ type WindowCounters = {
   approxChangedLines: number;
 };
 
+// Strongest-wins priority when several triggers fire within the debounce window.
+const REASON_PRIORITY: AutoCommitReason[] = [
+  'manual',
+  'testPass',
+  'threshold',
+  'closeAllEditors',
+  'idle',
+  'saveBurst',
+];
+
+const DEBOUNCE_MS = 1500;
+
 export class AutoCommitEngine implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private config: CommitlyConfig;
   private readonly commitService: CommitService;
+  private readonly commitMessageService: CommitMessageService;
 
   private idleTimer: NodeJS.Timeout | undefined;
-  private pendingReason: AutoCommitReason | undefined;
+  private commitTimer: NodeJS.Timeout | undefined;
+  private readonly pendingReasons = new Set<AutoCommitReason>();
+
+  private isCommitting = false;
+  private rerunRequested = false;
+
+  private statusText = 'Commitly: watching';
   private counters: WindowCounters = {
     windowStartMs: Date.now(),
     changedFilePaths: new Set<string>(),
@@ -29,19 +62,28 @@ export class AutoCommitEngine implements vscode.Disposable {
 
   constructor(
     private readonly repo: Repository,
-    private readonly statusBar: StatusBar
+    private readonly deps: EngineDeps
   ) {
     this.commitService = new CommitService(repo);
     this.config = loadCommitlyConfig(repo.rootUri);
-
-    this.statusBar.setEnabled(this.config.autoCommit);
-    this.statusBar.setText('Commitly: watching');
+    this.commitMessageService = new CommitMessageService({
+      repo,
+      secrets: deps.context.secrets,
+      globalState: deps.context.globalState,
+      machineId: vscode.env.machineId,
+      version: String(deps.context.extension.packageJSON.version ?? '0.0.0'),
+      getConfig: () => this.config,
+      log: (m) => this.log(m),
+      onNeedConsent: () => this.deps.requestAiConsent(),
+    });
+    this.setStatus('Commitly: watching');
 
     this.disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (!e.affectsConfiguration('commitly')) return;
         this.config = loadCommitlyConfig(this.repo.rootUri);
-        this.statusBar.setEnabled(this.config.autoCommit);
+        this.setStatus(this.statusText);
+        this.resetIdleTimer();
       }),
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (!this.isInRepo(e.document.uri.fsPath)) return;
@@ -55,7 +97,7 @@ export class AutoCommitEngine implements vscode.Disposable {
         if (!this.config.autoCommit) return;
         if (!this.config.triggers.closeAllEditors) return;
         if (editors.length !== 0) return;
-        void this.maybeCommit('closeAllEditors');
+        this.scheduleCommit('closeAllEditors');
       }),
       vscode.tasks.onDidEndTaskProcess((e) => {
         if (!this.config.autoCommit) return;
@@ -64,21 +106,11 @@ export class AutoCommitEngine implements vscode.Disposable {
         const name = e.execution.task.name.toLowerCase();
         if (!this.config.testTaskNameIncludes.some((s) => name.includes(s)))
           return;
-        void this.maybeCommit('testPass');
-      }),
-      this.repo.state.onDidChange(() => {
-        if (!this.config.autoCommit) return;
-        if (!this.config.triggers.branchSwitch) return;
-        // VS Code Git API fires state changes around checkout; repo.onDidCheckout is not always present.
-      }),
-      this.repo.onDidCheckout(() => {
-        if (!this.config.autoCommit) return;
-        if (!this.config.triggers.branchSwitch) return;
-        void this.maybeCommit('branchSwitch');
+        this.scheduleCommit('testPass');
       }),
       this.repo.onDidCommit(() => {
-        // Keep status bar fresh even if commit wasn't made by us.
-        this.statusBar.setText('Commitly: watching');
+        // Keep status fresh even if the commit wasn't made by us.
+        this.setStatus('Commitly: watching');
       })
     );
 
@@ -87,6 +119,7 @@ export class AutoCommitEngine implements vscode.Disposable {
 
   dispose() {
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.commitTimer) clearTimeout(this.commitTimer);
     for (const d of this.disposables) d.dispose();
   }
 
@@ -104,6 +137,11 @@ export class AutoCommitEngine implements vscode.Disposable {
 
   async commitNow(reason: AutoCommitReason) {
     await this.maybeCommit(reason, { force: true });
+  }
+
+  private setStatus(text: string) {
+    this.statusText = text;
+    this.deps.reportStatus({ enabled: this.config.autoCommit, text });
   }
 
   private isInRepo(fsPath: string): boolean {
@@ -125,9 +163,9 @@ export class AutoCommitEngine implements vscode.Disposable {
       this.counters.approxChangedLines += estimateChangedLines(contentChanges);
     }
 
-    if (this.config.triggers.saveBurst) {
-      // Save burst is implemented as: reset idle timer and check thresholds on save.
-      if (kind === 'save') void this.maybeCommit('saveBurst');
+    if (kind === 'save' && this.config.triggers.saveBurst) {
+      // Debounced: a burst of saves collapses into a single scheduled commit.
+      this.scheduleCommit('saveBurst');
     }
 
     if (
@@ -135,7 +173,7 @@ export class AutoCommitEngine implements vscode.Disposable {
       (this.counters.changedFilePaths.size >= this.config.fileChangeThreshold ||
         this.counters.approxChangedLines >= this.config.lineChangeThreshold)
     ) {
-      void this.maybeCommit('threshold');
+      this.scheduleCommit('threshold');
     }
   }
 
@@ -143,20 +181,51 @@ export class AutoCommitEngine implements vscode.Disposable {
     const now = Date.now();
     const ageSec = (now - this.counters.windowStartMs) / 1000;
     if (ageSec < this.config.groupChangesWithinSec) return;
+    this.resetCounters();
+  }
+
+  private resetCounters() {
     this.counters = {
-      windowStartMs: now,
+      windowStartMs: Date.now(),
       changedFilePaths: new Set<string>(),
       approxChangedLines: 0,
     };
   }
 
   private resetIdleTimer() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
     if (!this.config.autoCommit) return;
     if (!this.config.triggers.idle) return;
-    if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
-      void this.maybeCommit('idle');
+      this.scheduleCommit('idle');
     }, this.config.idleThresholdSec * 1000);
+  }
+
+  /**
+   * Coalesce overlapping triggers into a single commit. Repeated calls within
+   * the debounce window keep the strongest reason and re-arm the timer.
+   */
+  private scheduleCommit(reason: AutoCommitReason) {
+    if (!this.config.autoCommit) return;
+    this.pendingReasons.add(reason);
+    if (this.commitTimer) clearTimeout(this.commitTimer);
+    this.commitTimer = setTimeout(() => {
+      this.commitTimer = undefined;
+      const strongest = this.takeStrongestReason();
+      if (strongest) void this.maybeCommit(strongest);
+    }, DEBOUNCE_MS);
+  }
+
+  private takeStrongestReason(): AutoCommitReason | undefined {
+    for (const r of REASON_PRIORITY) {
+      if (this.pendingReasons.has(r)) {
+        this.pendingReasons.clear();
+        return r;
+      }
+    }
+    const first = this.pendingReasons.values().next().value;
+    this.pendingReasons.clear();
+    return first;
   }
 
   private async maybeCommit(
@@ -165,24 +234,56 @@ export class AutoCommitEngine implements vscode.Disposable {
   ) {
     if (!this.config.autoCommit && !opts?.force) return;
 
-    // Debounce overlapping triggers: keep strongest "reason" around and commit once.
-    this.pendingReason = this.pendingReason ?? reason;
-    const effectiveReason = this.pendingReason;
-    this.pendingReason = undefined;
+    // Serialize: never let two commit passes overlap.
+    if (this.isCommitting) {
+      this.rerunRequested = true;
+      return;
+    }
+    this.isCommitting = true;
+    try {
+      await this.runCommit(reason, opts);
+    } catch (err) {
+      this.log(`commit pass failed: ${errText(err)}`);
+    } finally {
+      this.isCommitting = false;
+      this.resetIdleTimer();
+      if (this.rerunRequested) {
+        this.rerunRequested = false;
+        this.scheduleCommit(reason);
+      }
+    }
+  }
 
-    if (vscode.workspace.textDocuments.some((d) => d.isDirty)) {
-      this.statusBar.setText('Commitly: waiting (unsaved files)');
+  private async runCommit(
+    reason: AutoCommitReason,
+    opts?: { force?: boolean }
+  ) {
+    const force = opts?.force === true;
+
+    // Repo-scoped unsaved guard: unsaved files in *other* repos are irrelevant.
+    const dirty = vscode.workspace.textDocuments
+      .filter((d) => this.isInRepo(d.uri.fsPath))
+      .some((d) => d.isDirty);
+    if (dirty) {
+      this.setStatus('Commitly: waiting (unsaved files)');
       return;
     }
 
-    const changes = this.getEligibleChanges();
-    if (changes.length === 0) {
-      this.statusBar.setText('Commitly: clean');
+    // On the automatic path, back off when the user has staged changes of
+    // their own so we never clobber a hand-crafted partial commit.
+    if (!force && this.repo.state.indexChanges.length > 0) {
+      this.setStatus('Commitly: waiting (staged changes present)');
       return;
     }
 
     if (this.repo.state.mergeChanges.length > 0) {
-      this.statusBar.setText('Commitly: waiting (merge conflicts)');
+      this.setStatus('Commitly: waiting (merge conflicts)');
+      return;
+    }
+
+    const changes = this.getEligibleChanges(force);
+    if (changes.length === 0) {
+      this.setStatus('Commitly: clean');
       return;
     }
 
@@ -191,96 +292,68 @@ export class AutoCommitEngine implements vscode.Disposable {
       this.config.blockOnDiagnostics
     );
     if (hasErrors) {
-      this.statusBar.setText('Commitly: waiting (problems found)');
+      this.setStatus('Commitly: waiting (problems found)');
       return;
     }
 
-    const message = await this.commitService.generateMessage(
-      effectiveReason,
-      changes
-    );
+    let message = await this.commitMessageService.generate({ reason, changes });
 
-    if (!opts?.force) {
-      const ok = await this.commitService.branchRelevanceOk(
-        message,
-        this.config.branchRelevance
-      );
+    if (!force && this.config.branchRelevance) {
+      const ok = await this.commitService.branchRelevanceOk(message, true);
       if (!ok) {
-        this.statusBar.setText('Commitly: waiting (branch mismatch)');
-        return;
+        // The message type conflicts with the branch intent; fall back to the
+        // branch-derived heuristic (which passes by construction) rather than
+        // skipping the commit entirely.
+        message = await this.commitService.generateMessage(reason, changes);
       }
     }
 
-    this.statusBar.setText(`Commitly: committing (${effectiveReason})…`);
+    this.setStatus(`Commitly: committing (${reason})…`);
     try {
       await this.commitService.commit(message, changes, {
         pushAfterCommit: this.config.pushAfterCommit,
         pushStrategy: this.config.pushStrategy,
       });
       this.lastAutoCommitAtMs = Date.now();
-      this.statusBar.setText('Commitly: auto-committed');
-      this.counters = {
-        windowStartMs: Date.now(),
-        changedFilePaths: new Set<string>(),
-        approxChangedLines: 0,
-      };
+      this.setStatus('Commitly: auto-committed');
+      this.resetCounters();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.statusBar.setText('Commitly: failed');
-      void vscode.window.showWarningMessage(`Commitly: auto-commit failed: ${msg}`);
-    } finally {
-      this.resetIdleTimer();
+      this.setStatus('Commitly: failed');
+      this.log(`auto-commit failed: ${errText(err)}`);
+      void vscode.window.showWarningMessage(
+        `Commitly: auto-commit failed: ${errText(err)}`
+      );
     }
   }
 
-  private getEligibleChanges(): Change[] {
+  private getEligibleChanges(includeIndex: boolean): Change[] {
     const ignores = this.config.ignorePatterns;
-    const inWorkingTree = this.repo.state.workingTreeChanges.filter((c) =>
+    const wt = this.repo.state.workingTreeChanges.filter((c) =>
       this.isEligiblePath(c.uri.fsPath, ignores)
     );
-    const inIndex = this.repo.state.indexChanges.filter((c) =>
-      this.isEligiblePath(c.uri.fsPath, ignores)
-    );
-    // Keep already-staged changes (indexChanges) + stage working tree tracked changes.
-    const all = [...inIndex, ...inWorkingTree];
-    // Deduplicate by final uri path.
     const uniq = new Map<string, Change>();
-    for (const c of all) uniq.set(c.uri.fsPath, c);
+    if (includeIndex) {
+      for (const c of this.repo.state.indexChanges) {
+        if (this.isEligiblePath(c.uri.fsPath, ignores)) uniq.set(c.uri.fsPath, c);
+      }
+    }
+    for (const c of wt) uniq.set(c.uri.fsPath, c);
     return [...uniq.values()];
   }
 
   private isEligiblePath(fsPath: string, ignorePatterns: string[]): boolean {
     if (!this.isInRepo(fsPath)) return false;
     const rel = path.relative(this.repo.rootUri.fsPath, fsPath);
-    if (!rel || rel.startsWith('..')) return false;
-    if (rel === '.commitlyrc') return true;
-    return !ignorePatterns.some((p) => matchesSimpleGlob(rel, p));
+    return isEligibleRel(rel, ignorePatterns);
+  }
+
+  private log(message: string) {
+    this.deps.log.appendLine(
+      `[${path.basename(this.repo.rootUri.fsPath)}] ${message}`
+    );
   }
 }
 
-function estimateChangedLines(
-  changes: readonly vscode.TextDocumentContentChangeEvent[]
-): number {
-  let lines = 0;
-  for (const c of changes) {
-    const touched = Math.max(1, c.range.end.line - c.range.start.line + 1);
-    const inserted = c.text ? c.text.split('\n').length : 0;
-    lines += Math.max(touched, inserted);
-  }
-  return lines;
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
-
-function matchesSimpleGlob(relPath: string, pattern: string): boolean {
-  // Very small glob: supports "*" (no path separator), and "*.ext".
-  if (pattern === relPath) return true;
-  if (pattern === '*') return true;
-  if (pattern.startsWith('*.')) {
-    return relPath.endsWith(pattern.slice(1));
-  }
-  if (pattern.includes('*')) {
-    const [a, b] = pattern.split('*');
-    return relPath.startsWith(a) && relPath.endsWith(b ?? '');
-  }
-  return false;
-}
-

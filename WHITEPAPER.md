@@ -76,9 +76,9 @@ Logical model: For every trigger below, run one or many of the following checks.
 Commitly integrates smart commit generation so your Git history stays **clean**, **consistent**, and **machine-parseable**.
 
 - Supports **Conventional Commits** out of the box.
-- AI-powered diff summarization using OpenAI API or ai-sdk.
+- AI-powered diff summarization via **Groq** (using the Vercel AI SDK), with a
+  deterministic heuristic fallback.
 - Auto-suggests message type (`feat`, `fix`, `chore`, `docs`, etc.).
-- Optional `[auto]` prefix for system commits.
 
 Example:
 
@@ -112,12 +112,12 @@ Commitly respects that.
 ```json
 {
   "autoCommit": true,
-  "triggers": ["idle", "branchSwitch", "testPass"],
+  "triggers": ["idle", "saveBurst", "testPass"],
   "idleThreshold": 60,
   "groupChangesWithin": 180,
   "pushAfterCommit": true,
   "pushStrategy": "batch",
-  "aiCommitMessage": true,
+  "ai": { "enabled": true, "tier": "auto" },
   "ignorePatterns": ["*.env", "README.md"]
 }
 ```

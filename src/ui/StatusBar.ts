@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 
 export class StatusBar implements vscode.Disposable {
   private readonly item: vscode.StatusBarItem;
-  private enabled = true;
 
   constructor() {
     this.item = vscode.window.createStatusBarItem(
@@ -11,7 +10,7 @@ export class StatusBar implements vscode.Disposable {
     );
     this.item.command = 'commitly.showStatus';
     this.item.text = 'Commitly';
-    this.item.tooltip = 'Commitly';
+    this.item.tooltip = 'Commitly — click for status';
     this.item.show();
   }
 
@@ -19,13 +18,10 @@ export class StatusBar implements vscode.Disposable {
     this.item.dispose();
   }
 
-  setEnabled(enabled: boolean) {
-    this.enabled = enabled;
-    this.item.color = enabled ? undefined : new vscode.ThemeColor('disabledForeground');
-  }
-
-  setText(text: string) {
+  render(text: string, enabled: boolean) {
     this.item.text = text;
+    this.item.color = enabled
+      ? undefined
+      : new vscode.ThemeColor('disabledForeground');
   }
 }
-
